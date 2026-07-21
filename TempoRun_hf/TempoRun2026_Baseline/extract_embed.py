@@ -77,10 +77,10 @@ def main():
     model = ClipModel(model_name= args.model,precision= args.precision, device=args.device,max_text_length= args.max_length) # Sửa đoạn này nếu lấy file .pth
     print(f"[clip] {args.model} on {args.device} ", flush=True)
 
-    if(args.pretrained == "None"):
-        # Load pth file
-        assign_LoRA(model,lora_r= 8,lora_alpha=16)
-        Apply_weights(model,args.device,args.pth_dir)
+    # if(args.pretrained == "None"):
+    #     # Load pth file
+    #     assign_LoRA(model,lora_r= 8,lora_alpha=16)
+    #     Apply_weights(model,args.device,args.pth_dir)
 
     t0 = time.time(); done = nframes = failed = 0
     for vdir in mine:
