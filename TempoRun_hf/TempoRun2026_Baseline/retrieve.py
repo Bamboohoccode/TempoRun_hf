@@ -39,7 +39,8 @@ def main():
     p.add_argument("--out", required=True, help="submission.json path")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--model", default="ViT-B-32")
-    p.add_argument("--pretrained", default="laion2b_s34b_b79k")
+    p.add_argument("--precision", default="fp16")
+    p.add_argument("--max_length", type = int, default= 64)
     p.add_argument("--top-videos", type=int, default=10)
     p.add_argument("--cand-keyframes", type=int, default=400)
     p.add_argument("--pth_dir",default = "")
@@ -52,11 +53,11 @@ def main():
 
     from clip_model import ClipModel
     from LoRA import     assign_LoRA,Apply_weights
-    model = ClipModel(args.model, args.pretrained, device=args.device)
-    assign_LoRA(model,lora_r= 8,lora_alpha=16)
+    model = ClipModel(model_name= args.model,precision= args.precision, device=args.device,max_text_length= args.max_length) # Sửa đoạn này nếu lấy file .pth
 
     if(args.pretrained == "None"):
         # Load pth file
+        assign_LoRA(model,lora_r= 8,lora_alpha=16)
         Apply_weights(model,args.device,args.pth_dir)
     
     Q = model.encode_texts([t["description"] for t in tasks])      # [T, D] fp32

@@ -44,17 +44,19 @@ def load_frames(vdir):
     return imgs, kept_ts
 
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keyframes", required=True, help="dir produced by extract_keyframes.py")
     ap.add_argument("--out", required=True)
     ap.add_argument("--model", default="ViT-B-32")
-    ap.add_argument("--pretrained", default="laion2b_s34b_b79k")
+    ap.add_argument("--precision", default="fp16")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--shard-index", type=int, default=0)
     ap.add_argument("--shard-count", type=int, default=1)
     ap.add_argument("--limit", type=int, default=0, help="debug: cap #videos")
+    ap.add_argument("--max_length", type = int, default= 64)
     ap.add_argument("--pth_dir",default = "")
     args = ap.parse_args()
 
@@ -72,12 +74,12 @@ def main():
 
     from clip_model import ClipModel
     from LoRA import assign_LoRA,Apply_weights
-    model = ClipModel(args.model, args.pretrained, device=args.device) # Sửa đoạn này nếu lấy file .pth
+    model = ClipModel(model_name= args.model,precision= args.precision, device=args.device,max_text_length= args.max_length) # Sửa đoạn này nếu lấy file .pth
     print(f"[clip] {args.model}/{args.pretrained} on {args.device} ", flush=True)
-    assign_LoRA(model,lora_r= 8,lora_alpha=16)
 
     if(args.pretrained == "None"):
         # Load pth file
+        assign_LoRA(model,lora_r= 8,lora_alpha=16)
         Apply_weights(model,args.device,args.pth_dir)
 
     t0 = time.time(); done = nframes = failed = 0
