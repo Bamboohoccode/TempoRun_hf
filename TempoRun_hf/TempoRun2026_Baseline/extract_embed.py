@@ -75,7 +75,7 @@ def main():
     from clip_model import ClipModel
     from LoRA import assign_LoRA,Apply_weights
     model = ClipModel(model_name= args.model,precision= args.precision, device=args.device,max_text_length= args.max_length) # Sửa đoạn này nếu lấy file .pth
-    print(f"[clip] {args.model}/{args.pretrained} on {args.device} ", flush=True)
+    print(f"[clip] {args.model} on {args.device} ", flush=True)
 
     if(args.pretrained == "None"):
         # Load pth file
