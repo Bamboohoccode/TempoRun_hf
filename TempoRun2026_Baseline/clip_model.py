@@ -72,6 +72,8 @@ class ClipModel(nn.Module):
 
             with torch.inference_mode():
                 features = self.model.get_image_features(**img_inputs)
+                if not isinstance(features, torch.Tensor):
+                    features = features.pooler_output
                 features = F.normalize(features,dim = -1)
                 features = (features.float().cpu().numpy().astype(self.np_dtype))
                 feats.append(features)
@@ -91,6 +93,8 @@ class ClipModel(nn.Module):
                                   return_tensors = "pt").to(self.device)
             with torch.inference_mode():
                 features = self.model.get_text_features(**toks)
+                if not isinstance(features, torch.Tensor):
+                    features = features.pooler_output
                 features = F.normalize(features,dim = -1)
                 feats.append(features.float().cpu().numpy().astype(self.np_dtype))
     
