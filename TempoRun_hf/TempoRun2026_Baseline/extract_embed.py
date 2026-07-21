@@ -49,7 +49,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keyframes", required=True, help="dir produced by extract_keyframes.py")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--model", default="ViT-B-32")
+    ap.add_argument("--model", default="google/siglip2-base-patch16-224")
     ap.add_argument("--precision", default="fp16")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--batch-size", type=int, default=64)
