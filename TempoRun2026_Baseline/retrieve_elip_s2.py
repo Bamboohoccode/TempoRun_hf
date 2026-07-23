@@ -202,7 +202,28 @@ def rerank_task(
     rerank_batch_size: int,
     stage1_weight: float,
 ):
+    # No mapper checkpoint: run the pretrained SigLIP2 Stage 1 only.  Do not
+    # instantiate or score with an untrained random prompt mapper.
+    if reranker is None:
+        results = []
+        used_videos = set()
+        for row, _ in candidates:
+            video_id = str(video_ids[row])
+            if video_id in used_videos:
+                continue
+            results.append((video_id, int(timestamps[row])))
+            used_videos.add(video_id)
+            if len(results) >= top_videos:
+                break
+        return [
+            {"rank": rank, "video_id": video_id, "frame_ms": frame_ms}
+            for rank, (video_id, frame_ms) in enumerate(results, start=1)
+        ]
+
     from PIL import Image
+
+    if resolver is None:
+        raise ValueError("Keyframe resolver is required when ELIP is enabled")
 
     images, valid_candidates = [], []
     for row, stage1_score in candidates:
@@ -268,13 +289,31 @@ def rerank_task(
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--shards", required=True)
-    parser.add_argument("--keyframes", required=True)
+    parser.add_argument(
+        "--keyframes",
+        default="",
+        help="raw keyframe root; required only when --elip-checkpoint is used",
+    )
     parser.add_argument("--tasks", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--elip-checkpoint", required=True)
+    parser.add_argument(
+        "--elip-checkpoint",
+        default="",
+        help="official ELIP-S-2 .pt; omit for pretrained SigLIP2 Stage 1 only",
+    )
+    parser.add_argument(
+        "--elip-repo",
+        default="",
+        help="path to the cloned official ypliubit/ELIP repository",
+    )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument(
-        "--model", default="google/siglip2-base-patch16-224"
+        "--model", default="ViT-gopt-16-SigLIP2-384"
+    )
+    parser.add_argument(
+        "--pretrained",
+        default="webli",
+        help="OpenCLIP pretrained tag; use None only for random weights",
     )
     parser.add_argument("--precision", choices=["fp16", "bf16", "fp32"], default="fp16")
     parser.add_argument("--max-length", type=int, default=64)
@@ -283,7 +322,7 @@ def parse_args():
     parser.add_argument("--max-keyframes-per-video", type=int, default=3)
     parser.add_argument("--index-chunk-size", type=int, default=200_000)
     parser.add_argument("--query-batch-size", type=int, default=32)
-    parser.add_argument("--rerank-batch-size", type=int, default=16)
+    parser.add_argument("--rerank-batch-size", type=int, default=2)
     parser.add_argument("--num-prompts", type=int, default=10)
     parser.add_argument(
         "--score-dtype", choices=["fp16", "fp32"], default="fp16"
@@ -305,6 +344,12 @@ def parse_args():
         parser.error("--stage1-weight must be in [0, 1]")
     if args.cand_keyframes < args.top_videos:
         parser.error("--cand-keyframes must be >= --top-videos")
+    if args.elip_checkpoint and (not args.keyframes or not args.elip_repo):
+        parser.error(
+            "--keyframes and --elip-repo are required with --elip-checkpoint"
+        )
+    if args.elip_checkpoint and args.lora_checkpoint:
+        parser.error("LoRA and the official ELIP checkpoint cannot be combined")
     return args
 
 
@@ -314,23 +359,48 @@ def main():
     tasks = read_tasks(args.tasks)
     print(f"[tasks] {len(tasks)}", flush=True)
 
-    from clip_model_siglip2 import ClipModel
-    from elip_s2 import ELIPS2Reranker
+    descriptions = [task["description"] for task in tasks]
+    if args.elip_checkpoint:
+        # Importing official ELIP and pip open_clip in one process would bind
+        # the same module name to two implementations. Use only ELIP's encoder
+        # in this branch; it shares the SigLIP2 embedding space with Stage 1.
+        from elip_s2 import ELIPS2Reranker
 
-    model = ClipModel(
-        model_name=args.model,
-        precision=args.precision,
-        device=args.device,
-        max_text_length=args.max_length,
-    )
-    if args.lora_checkpoint:
-        from LoRA import Apply_weights, assign_LoRA
+        reranker = ELIPS2Reranker(
+            checkpoint=args.elip_checkpoint,
+            elip_repo=args.elip_repo,
+            model_name=args.model,
+            pretrained=args.pretrained,
+            precision=args.precision,
+            device=args.device,
+            max_text_length=args.max_length,
+        )
+        queries = reranker.encode_texts(descriptions)
+        resolver = KeyframeResolver(args.keyframes)
+        print(f"[stage2] ELIP enabled: {args.elip_checkpoint}", flush=True)
+    else:
+        from clip_model_siglip2 import ClipModel
 
-        assign_LoRA(model, lora_r=8, lora_alpha=16)
-        Apply_weights(model, args.device, args.lora_checkpoint)
-        model.model.eval()
+        model = ClipModel(
+            model_name=args.model,
+            pretrained=args.pretrained,
+            precision=args.precision,
+            device=args.device,
+            max_text_length=args.max_length,
+        )
+        if args.lora_checkpoint:
+            from LoRA import Apply_weights, assign_LoRA
 
-    queries = model.encode_texts([task["description"] for task in tasks])
+            assign_LoRA(model, lora_r=8, lora_alpha=16)
+            Apply_weights(model, args.device, args.lora_checkpoint)
+            model.model.eval()
+        queries = model.encode_texts(descriptions)
+        reranker = None
+        resolver = None
+        print(
+            "[stage2] ELIP disabled; using pretrained SigLIP2 Stage 1 only",
+            flush=True,
+        )
 
     started = time.time()
     top_values, top_indices = chunked_topk(
@@ -348,13 +418,6 @@ def main():
         f"queries in {time.time() - started:.1f}s",
         flush=True,
     )
-
-    reranker = ELIPS2Reranker(
-        clip_model=model,
-        checkpoint=args.elip_checkpoint,
-        num_prompts=args.num_prompts,
-    )
-    resolver = KeyframeResolver(args.keyframes)
 
     predictions = []
     started = time.time()
